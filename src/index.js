@@ -1,114 +1,184 @@
 // Импортируем необходимые библиотеки
+const path = require('path');
 const express = require('express');
 const http = require('http');
-const path = require('path');
 const socketIo = require('socket.io');
+
+const __dirname = path.resolve(); // Важно: определяем корневую директорию
 
 // Создаем Express-приложение и HTTP-сервер
 const app = express();
 const server = http.createServer(app);
-const io = socketIo(server);
-
-// Задаем порт для сервера (возьмет из переменной окружения или 3000 по умолчанию)
-const PORT = process.env.PORT || 3000;
-
-// Запускаем сервер и слушаем порт
-server.listen(PORT, () => {
-  console.log(`🚗 Сервер RoadChat запущен по адресу: http://localhost:${PORT}`);
+const io = socketIo(server, {
+  cors: {
+    origin: "*",
+    methods: ["GET", "POST"]
+  }
 });
 
-// Настраиваем раздачу статических файлов из папки 'public'
-app.use(express.static(path.join(__dirname, '..'))); // Теперь сервер видит index.html, style.css в корне
+// Задаем порт для сервера
+const PORT = process.env.PORT || 3000;
 
-// Пример "базы данных" прямо в памяти сервера (для демонстрации)
-// ВНИМАНИЕ: При перезагрузке сервера все данные сотрутся!
+// Настраиваем раздачу статических файлов из корневой директории
+app.use(express.static(__dirname));
+
+// Обработчик для всех GET-запросов - отдаем index.html
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, 'index.html'));
+});
+
+// Пример "базы данных" в памяти
 let users = {};
 let messages = [];
 let onlineCount = 0;
 
-// Простейший фильтр стоп-слов (можно и нужно расширить)
+// Фильтр стоп-слов
 const bannedWords = ['спам', 'реклама', 'оскорбление', 'мат', 'дтп с летальным исходом'];
+
+// Функция для проверки сообщения
+function containsBannedWords(text) {
+  const lowerText = text.toLowerCase();
+  return bannedWords.some(word => lowerText.includes(word));
+}
 
 // Обрабатываем подключение по WebSocket
 io.on('connection', (socket) => {
   console.log('✅ Новый пользователь подключился');
-  onlineCount++; // Увеличиваем счетчик онлайн
-  io.emit('update online', onlineCount); // Рассылаем всем новое количество онлайн
+  onlineCount++;
+  io.emit('update online', onlineCount);
 
-  // Отправляем новому пользователю историю сообщений и общее число юзеров
+  // Отправляем историю сообщений и общее число пользователей
   socket.emit('load messages', messages);
   socket.emit('update total', Object.keys(users).length);
 
   // Обрабатываем попытку входа или регистрации
   socket.on('user auth', (userData) => {
-    // Простейшая проверка. В реальном проекте нужна БД и хэширование паролей!
-    if (!users[userData.email]) {
-      // Регистрируем нового пользователя
-      users[userData.email] = { 
-        password: userData.password, // ВНИМАНИЕ: В реальности пароль нужно хэшировать!
-        messages: [] 
-      };
-      console.log(`📝 Зарегистрирован новый пользователь: ${userData.email}`);
-    } else {
-      // Проверяем пароль для существующего пользователя (очень условно!)
-      if (users[userData.email].password !== userData.password) {
-        socket.emit('auth error', 'Неверный пароль');
+    try {
+      if (!userData || !userData.email || !userData.password) {
+        socket.emit('auth error', 'Неверные данные');
         return;
       }
-      console.log(`🔐 Пользователь вошел: ${userData.email}`);
+
+      if (!users[userData.email]) {
+        // Регистрируем нового пользователя
+        users[userData.email] = { 
+          password: userData.password,
+          messages: [],
+          lastMessageTime: null
+        };
+        console.log(`📝 Зарегистрирован новый пользователь: ${userData.email}`);
+      } else {
+        // Проверяем пароль
+        if (users[userData.email].password !== userData.password) {
+          socket.emit('auth error', 'Неверный пароль');
+          return;
+        }
+        console.log(`🔐 Пользователь вошел: ${userData.email}`);
+      }
+      
+      socket.userData = userData;
+      socket.emit('auth success', userData.email);
+      
+    } catch (error) {
+      console.error('Auth error:', error);
+      socket.emit('auth error', 'Ошибка сервера');
     }
-    // Если всё ок, сохраняем данные в объекте сокета и шлем успех
-    socket.userData = userData;
-    socket.emit('auth success', userData.email);
   });
 
-  // Обрабатываем новое сообщение от клиента
+  // Обрабатываем новое сообщение
   socket.on('new message', (msgText) => {
-    // Проверяем, авторизован ли пользователь
-    if (!socket.userData) {
-      socket.emit('message error', 'Сначала нужно авторизоваться!');
-      return;
+    try {
+      // Проверяем авторизацию
+      if (!socket.userData) {
+        socket.emit('message error', 'Сначала нужно авторизоваться!');
+        return;
+      }
+
+      // Проверяем пустое сообщение
+      if (!msgText || msgText.trim() === '') {
+        socket.emit('message error', 'Сообщение не может быть пустым');
+        return;
+      }
+
+      // Проверяем длину сообщения
+      if (msgText.length > 500) {
+        socket.emit('message error', 'Сообщение слишком длинное (макс. 500 символов)');
+        return;
+      }
+
+      // Проверяем на стоп-слова
+      if (containsBannedWords(msgText)) {
+        socket.emit('message error', 'Сообщение содержит запрещенное слово.');
+        return;
+      }
+
+      const user = users[socket.userData.email];
+      const now = Date.now();
+
+      // Проверяем лимит времени (1 сообщение в 30 секунд)
+      if (user.lastMessageTime && (now - user.lastMessageTime) < 30000) {
+        const timeLeft = Math.ceil((30000 - (now - user.lastMessageTime)) / 1000);
+        socket.emit('message error', `Слишком часто! Можно отправить новое сообщение через ${timeLeft} сек.`);
+        return;
+      }
+
+      // Обновляем время последнего сообщения
+      user.lastMessageTime = now;
+
+      // Создаем и сохраняем сообщение
+      const newMessage = {
+        text: msgText.trim(),
+        user: socket.userData.email,
+        time: new Date().toLocaleTimeString('ru-RU'),
+        timestamp: now
+      };
+
+      messages.push(newMessage);
+      
+      // Ограничиваем историю 100 сообщениями
+      if (messages.length > 100) {
+        messages = messages.slice(-100);
+      }
+
+      // Рассылаем сообщение всем клиентам
+      io.emit('new message', newMessage);
+      console.log(`💬 Новое сообщение от ${newMessage.user}: ${newMessage.text}`);
+
+    } catch (error) {
+      console.error('Message error:', error);
+      socket.emit('message error', 'Ошибка при отправке сообщения');
     }
-
-    // 1. ПРОВЕРКА НА СТОП-СЛОВА
-    const hasBannedWord = bannedWords.some(word => msgText.toLowerCase().includes(word));
-    if (hasBannedWord) {
-      socket.emit('message error', 'Сообщение содержит запрещенное слово.');
-      return;
-    }
-
-    const user = users[socket.userData.email];
-    const now = Date.now();
-
-    // 2. ПРОВЕРКА ЛИМИТА ВРЕМЕНИ (1 сообщение в 30 секунд)
-    if (user.lastMessageTime && (now - user.lastMessageTime) < 30000) {
-      const timeLeft = Math.ceil((30000 - (now - user.lastMessageTime)) / 1000);
-      socket.emit('message error', `Слишком часто! Можно отправить новое сообщение через ${timeLeft} сек.`);
-      return;
-    }
-    // Обновляем время последнего сообщения
-    user.lastMessageTime = now;
-
-    // 3. Если все проверки пройдены — сохраняем и рассылаем сообщение
-    const newMessage = {
-      text: msgText,
-      user: socket.userData.email, // Используем email как имя
-      time: new Date().toLocaleTimeString('ru-RU') // Время в русском формате
-    };
-
-    messages.push(newMessage); // Добавляем в историю
-    // Чтобы история не росла бесконечно, оставляем последние 100 сообщений
-    if (messages.length > 100) messages.shift();
-
-    // Рассылаем сообщение ВСЕМ подключенным клиентам
-    io.emit('new message', newMessage);
-    console.log(`💬 Новое сообщение от ${newMessage.user}: ${newMessage.text}`);
   });
 
   // Обрабатываем отключение пользователя
-  socket.on('disconnect', () => {
-    console.log('❌ Пользователь отключился');
-    onlineCount--;
-    io.emit('update online', onlineCount); // Обновляем счетчик онлайн для всех
+  socket.on('disconnect', (reason) => {
+    console.log(`❌ Пользователь отключился: ${reason}`);
+    onlineCount = Math.max(0, onlineCount - 1);
+    io.emit('update online', onlineCount);
+  });
+
+  // Обрабатываем ошибки подключения
+  socket.on('error', (error) => {
+    console.error('Socket error:', error);
+  });
+});
+
+// Обрабатываем ошибки сервера
+server.on('error', (error) => {
+  console.error('Server error:', error);
+});
+
+// Запускаем сервер
+server.listen(PORT, () => {
+  console.log(`🚗 Сервер RoadChat запущен по адресу: http://localhost:${PORT}`);
+  console.log(`📍 Режим: ${process.env.NODE_ENV || 'development'}`);
+});
+
+// Graceful shutdown
+process.on('SIGINT', () => {
+  console.log('\n🛑 Останавливаем сервер...');
+  server.close(() => {
+    console.log('✅ Сервер остановлен');
+    process.exit(0);
   });
 });
