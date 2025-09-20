@@ -3,6 +3,7 @@ const socket = io();
 
 // Находим элементы на странице
 const authButton = document.getElementById('auth-button');
+const logoutButton = document.getElementById('logout-button');
 const loginForm = document.getElementById('login-form');
 const inputArea = document.getElementById('input-area');
 const messageInput = document.getElementById('message-input');
@@ -16,6 +17,45 @@ let currentUser = null;
 let cooldownTime = 30000; // 30 секунд в миллисекундах
 let cooldownEndTime = 0;
 let timerInterval = null;
+
+// ===== СОХРАНЕНИЕ СЕССИИ =====
+
+// При загрузке страницы - проверяем сохраненную сессию
+document.addEventListener('DOMContentLoaded', () => {
+    const savedUser = localStorage.getItem('roadchat_user');
+    if (savedUser) {
+        const userData = JSON.parse(savedUser);
+        currentUser = userData;
+        
+        // Показываем интерфейс авторизованного пользователя
+        authButton.textContent = userData.email;
+        authButton.classList.add('hidden');
+        if (logoutButton) logoutButton.classList.remove('hidden');
+        inputArea.classList.remove('hidden');
+        loginForm.style.display = 'none';
+        
+        // Восстанавливаем сессию на сервере
+        socket.emit('restore session', userData);
+    }
+    stopCooldownTimer();
+});
+
+// Функция выхода
+function logout() {
+    localStorage.removeItem('roadchat_user');
+    currentUser = null;
+    authButton.textContent = 'Войти';
+    authButton.classList.remove('hidden');
+    if (logoutButton) logoutButton.classList.add('hidden');
+    inputArea.classList.add('hidden');
+    loginForm.style.display = 'none';
+    socket.emit('user logout');
+}
+
+// Добавляем обработчик кнопки выхода
+if (logoutButton) {
+    logoutButton.addEventListener('click', logout);
+}
 
 // ===== ФУНКЦИИ ДЛЯ ТАЙМЕРА =====
 
@@ -127,10 +167,17 @@ function sendMessage() {
 
 // ===== ОБРАБОТКА СОБЫТИЙ ОТ СЕРВЕРА =====
 
-socket.on('auth success', (email) => {
-    currentUser = email;
+socket.on('auth success', (userData) => {
+    currentUser = userData;
+    
+    // Сохраняем в LocalStorage
+    localStorage.setItem('roadchat_user', JSON.stringify(userData));
+    
+    // Обновляем интерфейс
+    authButton.textContent = userData.email;
+    authButton.classList.add('hidden');
+    if (logoutButton) logoutButton.classList.remove('hidden');
     loginForm.style.display = 'none';
-    authButton.textContent = email;
     inputArea.classList.remove('hidden');
     document.getElementById('auth-status').textContent = '';
     messageInput.focus();
@@ -179,8 +226,3 @@ function addMessageToChat(msg) {
     chatMessages.appendChild(messageEl);
     chatMessages.scrollTop = chatMessages.scrollHeight;
 }
-
-// При загрузке страницы убедимся что таймер скрыт
-document.addEventListener('DOMContentLoaded', () => {
-    stopCooldownTimer();
-});

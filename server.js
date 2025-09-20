@@ -48,6 +48,19 @@ io.on('connection', (socket) => {
   socket.emit('load messages', messages);
   socket.emit('update total', Object.keys(users).length);
 
+  // Обрабатываем реконнект (восстановление сессии)
+  socket.on('restore session', (userData) => {
+    try {
+      if (users[userData.email] && users[userData.email].password === userData.password) {
+        socket.userData = userData;
+        socket.emit('auth success', userData.email);
+        console.log(`🔐 Сессия восстановлена: ${userData.email}`);
+      }
+    } catch (error) {
+      console.error('Session restore error:', error);
+    }
+  });
+
   // Обрабатываем попытку входа или регистрации
   socket.on('user auth', (userData) => {
     try {
@@ -74,11 +87,23 @@ io.on('connection', (socket) => {
       }
       
       socket.userData = userData;
-      socket.emit('auth success', userData.email);
+      // Отправляем данные для сохранения в LocalStorage
+      socket.emit('auth success', {
+        email: userData.email,
+        password: userData.password // В реальном проекте не отправлять пароль!
+      });
       
     } catch (error) {
       console.error('Auth error:', error);
       socket.emit('auth error', 'Ошибка сервера');
+    }
+  });
+
+  // Обрабатываем выход пользователя
+  socket.on('user logout', (userData) => {
+    if (socket.userData) {
+      console.log(`🚪 Пользователь вышел: ${socket.userData.email}`);
+      socket.userData = null;
     }
   });
 
