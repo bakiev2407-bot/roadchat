@@ -3,7 +3,8 @@ const express = require('express');
 const http = require('http');
 const socketIo = require('socket.io');
 
-const __dirname = path.resolve();
+// Правильное определение __dirname для ES modules
+const __dirname = path.dirname(new URL(import.meta.url).pathname);
 
 // Создаем Express-приложение и HTTP-сервер
 const app = express();
