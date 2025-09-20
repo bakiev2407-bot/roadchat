@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RoadChat — Дорожный чат</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🚗 ДПС УЧАЛЫ </h1>
+            <div class="stats">
+                <span id="online-count">Онлайн: 0</span>
+                <span> | </span>
+                <span id="total-count">Всего: 0</span>
+            </div>
+            <button id="auth-button">Войти</button>
+        </header>
+
+        <main>
+            <!-- Лента сообщений -->
+            <div id="chat-messages"></div>
+
+            <!-- Форма ввода (показывается после авторизации) -->
+            <div id="input-area" class="hidden">
+                <textarea id="message-input" placeholder="О чем сообщаем? (ДТП, пробка, ДПС...) Максимум 200 символов." maxlength="200"></textarea>
+                <div class="send-container">
+                    <button id="send-button">Отправить</button>
+                    <div id="timer" class="timer-hidden">
+                        <span id="timer-text">30</span> сек
+                    </div>
+                </div>
+                <p id="timer-info"></p>
+            </div>
+
+            <!-- Форма авторизации -->
+            <div id="login-form" class="modal">
+                <div class="modal-content">
+                    <h2>Вход / Регистрация</h2>
+                    <input type="email" id="email-input" placeholder="Ваш e-mail">
+                    <input type="password" id="password-input" placeholder="Пароль">
+                    <button id="login-btn">Войти</button>
+                    <button id="register-btn">Зарегистрироваться</button>
+                    <p id="auth-status"></p>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Подключаем клиентскую библиотеку Socket.io -->
+    <script src="/socket.io/socket.io.js"></script>
+    <!-- Подключаем наш основной скрипт -->
+    <script src="script.js"></script>
+</body>
+</html>
